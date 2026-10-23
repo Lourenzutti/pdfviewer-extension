@@ -1,0 +1,11 @@
+/.quarto/
+tests/site/_site/
+tests/site/.quarto/
+tests/site/_extensions/
+tests/site/slides/
+tests/fallback/_extensions/
+tests/fallback/deck.pdf
+tests/fallback/fallback.md
+tests/fallback/.quarto/
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,13 @@
+---
+title: "Single deck"
+---
+
+Some text before the slides.
+
+{{< pdfslides slides/deck169.pdf title="Lecture 1" >}}
+
+Some text after the slides.
+
+::: {style="height: 1500px"}
+Tall content so the page can scroll.
+:::

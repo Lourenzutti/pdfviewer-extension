@@ -1,0 +1,7 @@
+---
+title: "Nested page"
+---
+
+{{< pdfslides /slides/deck169.pdf id=absolute >}}
+
+{{< pdfslides ../../slides/deck43.pdf id=relative >}}

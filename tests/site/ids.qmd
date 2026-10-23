@@ -1,0 +1,11 @@
+---
+title: "Ids"
+---
+
+{{< pdfslides slides/deck43.pdf id=pdfslides-1 >}}
+
+{{< pdfslides slides/deck43.pdf >}}
+
+{{< pdfslides slides/deck43.pdf id=week.1 >}}
+
+{{< pdfslides "slides/deck43.pdf?v=2" id=query max-width="10px;color:red" >}}

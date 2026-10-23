@@ -1,0 +1,17 @@
+---
+title: "Jump navigation"
+---
+
+{{< pdfslides slides/deck169.pdf sections="Intro: 1; Part 2: The middle: 3; The end: 6; broken" >}}
+
+Links in the text: [see slide 4](#/4), {{< slidelink 2 >}},
+{{< slidelink 3 page=index.qmd text="lecture 1, slide 3" >}}.
+
+{{< pdfslides slides/outline.pdf id=outlined >}}
+
+::: {style="height: 2000px"}
+Spacer.
+:::
+
+At the bottom: [again slide 4](#/4) and
+{{< slidelink 2 deck=outlined text="outline slide 2" >}}.

@@ -1,0 +1,8 @@
+---
+title: "Non-HTML fallback"
+format: gfm
+---
+
+{{< pdfslides deck.pdf title="Lecture slides" sections="Intro: 1" >}}
+
+See {{< slidelink 4 text="the fourth slide" >}}.

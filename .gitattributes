@@ -1,0 +1,3 @@
+* text=auto eol=lf
+_extensions/pdfslides/pdfjs/** -text
+*.pdf binary

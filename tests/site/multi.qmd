@@ -1,0 +1,29 @@
+---
+title: "Several decks"
+---
+
+{{< pdfslides slides/deck169.pdf >}}
+
+::: {style="height: 2500px"}
+Spacer pushing the next deck far below the fold.
+:::
+
+{{< pdfslides slides/deck43.pdf id=square >}}
+
+## Mixed page sizes
+
+{{< pdfslides slides/mixed.pdf id=mixed >}}
+
+## In a tabset
+
+::: {.panel-tabset}
+
+### First tab
+
+Nothing here.
+
+### Slides tab
+
+{{< pdfslides slides/deck43.pdf id=tabbed >}}
+
+:::

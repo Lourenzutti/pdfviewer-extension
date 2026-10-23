@@ -1,0 +1,12 @@
+---
+title: "Options and errors"
+pdfslides:
+  download: false
+  id: ignored-in-metadata
+---
+
+{{< pdfslides slides/deck169.pdf start=3 hash=false title="Starts at 3" aspect=4:3 max-width=600px >}}
+
+{{< pdfslides slides/does-not-exist.pdf id=missing >}}
+
+{{< pdfslides "slides/my deck.pdf" id=spaces download=true >}}
