@@ -8,7 +8,7 @@
 --   pdfslides:
 --     download: false
 
-local VERSION = "1.0.0"
+local VERSION = "1.1.0"
 -- Options that may also come from `pdfslides:` metadata (not `id`: it must be unique).
 local OPTIONS = { "start", "title", "aspect", "download", "hash", "max-width" }
 

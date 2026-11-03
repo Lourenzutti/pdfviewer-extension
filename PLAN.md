@@ -1,3 +1,9 @@
+> **Status (v1.1.0):** this is the original design plan, kept for background. The README is
+> the up-to-date user documentation. Added since this plan: contents and overview panels,
+> `sections` option, `slidelink` shortcode, progress-bar scrubbing, annotation (pens and
+> highlighter), a toolbar without slide titles, a toolbar-less fullscreen, and CSS isolation
+> from site-wide `button` styles. Where this plan and the code disagree, the code wins.
+
 # pdfslides — Quarto shortcode extension: design plan
 
 Goal: a course website (Quarto website/book, HTML output) embeds PowerPoint-exported

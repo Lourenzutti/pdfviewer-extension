@@ -36,7 +36,7 @@ def test_loads_first_slide(page, server):
     root = open_page(page, server, "index.html", page_no=1)
     expect(root.locator(".pdfslides-total")).to_have_text("/ 6")
     expect(root.locator(".pdfslides-fallback")).to_be_hidden()
-    canvas = root.locator("canvas")
+    canvas = root.locator("canvas:not(.pdfslides-ink)")
     expect(canvas).to_have_count(1)
     assert canvas.evaluate("c => c.width > 0 && c.height > 0")
     no_errors(page)
@@ -44,7 +44,7 @@ def test_loads_first_slide(page, server):
 
 def test_canvas_is_not_blank(page, server):
     root = open_page(page, server, "index.html", page_no=1)
-    dark = root.locator("canvas").evaluate("""c => {
+    dark = root.locator("canvas:not(.pdfslides-ink)").evaluate("""c => {
         const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
         let n = 0;
         for (let i = 0; i < d.length; i += 4) if (d[i] < 100) n++;
@@ -65,7 +65,7 @@ def test_hidpi_backing_store(browser, server):
     pg = ctx.new_page()
     pg.goto(f"{server}/index.html")
     root = wait_ready(pg, "#pdfslides-1", 1)
-    w, css = root.locator("canvas").evaluate("c => [c.width, c.getBoundingClientRect().width]")
+    w, css = root.locator("canvas:not(.pdfslides-ink)").evaluate("c => [c.width, c.getBoundingClientRect().width]")
     assert w == pytest.approx(2 * css, abs=2)
     ctx.close()
 
@@ -179,7 +179,7 @@ def test_rapid_navigation_lands_on_last_slide(page, server):
     rendered(root, 6)
     page.wait_for_timeout(500)
     rendered(root, 6)
-    assert root.locator("canvas").count() == 1
+    assert root.locator("canvas:not(.pdfslides-ink)").count() == 1
     no_errors(page)
 
 
@@ -298,11 +298,11 @@ def test_pseudo_fullscreen_fallback(page, server):
 
 def test_resize_rerenders_sharply(page, server):
     root = open_page(page, server, "index.html", page_no=1)
-    before = root.locator("canvas").evaluate("c => c.width")
+    before = root.locator("canvas:not(.pdfslides-ink)").evaluate("c => c.width")
     page.set_viewport_size({"width": 700, "height": 800})
     page.wait_for_function(
-        "w => document.querySelector('#pdfslides-1 canvas').width < w", arg=before)
-    w, css = root.locator("canvas").evaluate("c => [c.width, c.getBoundingClientRect().width]")
+        "w => document.querySelector('#pdfslides-1 canvas:not(.pdfslides-ink)').width < w", arg=before)
+    w, css = root.locator("canvas:not(.pdfslides-ink)").evaluate("c => [c.width, c.getBoundingClientRect().width]")
     assert w == pytest.approx(css, abs=2)
 
 
@@ -310,7 +310,7 @@ def test_player_in_hidden_tab_renders_when_shown(page, server):
     page.goto(f"{server}/multi.html")
     page.get_by_role("tab", name="Slides tab").click()
     root = wait_ready(page, "#tabbed", 1)
-    assert root.locator("canvas").evaluate("c => c.width") > 100
+    assert root.locator("canvas:not(.pdfslides-ink)").evaluate("c => c.width") > 100
 
 
 def test_nested_page_paths(page, server):
@@ -474,3 +474,107 @@ def test_page_input_requires_integer(page, server):
     inp.fill("2junk"); page.keyboard.press("Enter")
     expect(inp).to_have_value("1")
     rendered(root, 1)
+
+
+# ---- Annotation ------------------------------------------------------------
+
+def ink_alpha_sum(root):
+    return root.locator("canvas.pdfslides-ink").evaluate("""c => {
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let n = 0;
+        for (let i = 3; i < d.length; i += 4) n += d[i];
+        return n;
+    }""")
+
+
+def draw(page, root, dx=200, dy=60):
+    box = root.locator(".pdfslides-frame").bounding_box()
+    x, y = box["x"] + box["width"] * 0.3, box["y"] + box["height"] * 0.5
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + dx / 2, y + dy / 2)
+    page.mouse.move(x + dx, y + dy)
+    page.mouse.up()
+
+
+def test_annotation_draws_without_turning_pages(page, server):
+    root = open_page(page, server, "index.html", page_no=1)
+    palette = root.locator(".pdfslides-palette")
+    expect(palette).to_be_hidden()
+    root.locator("button[aria-label='Annotate (D)']").click()
+    expect(palette).to_be_visible()
+    assert ink_alpha_sum(root) == 0
+    draw(page, root)
+    rendered(root, 1)  # a stroke is not a click on the slide
+    assert ink_alpha_sum(root) > 0
+    no_errors(page)
+
+
+def test_annotation_is_kept_per_slide_and_undo_clear(page, server):
+    root = open_page(page, server, "index.html", page_no=1)
+    root.locator(".pdfslides-stage").focus()
+    page.keyboard.press("d")
+    expect(root).to_have_class(re.compile(r"\bis-drawing\b"))
+    draw(page, root)
+    drawn = ink_alpha_sum(root)
+    assert drawn > 0
+    page.keyboard.press("ArrowRight")
+    rendered(root, 2)
+    assert ink_alpha_sum(root) == 0
+    page.keyboard.press("ArrowLeft")
+    rendered(root, 1)
+    assert ink_alpha_sum(root) == drawn
+    draw(page, root, dy=-80)
+    assert ink_alpha_sum(root) > drawn
+    page.keyboard.press("z")
+    assert ink_alpha_sum(root) == drawn
+    root.locator("button[aria-label=\"Clear this slide's ink\"]").click()
+    assert ink_alpha_sum(root) == 0
+    page.keyboard.press("Escape")
+    expect(root).not_to_have_class(re.compile(r"\bis-drawing\b"))
+    expect(root.locator(".pdfslides-palette")).to_be_hidden()
+
+
+def test_annotation_colors_and_highlighter(page, server):
+    root = open_page(page, server, "index.html", page_no=1)
+    root.locator(".pdfslides-stage").focus()
+    page.keyboard.press("d")
+    root.locator("button[aria-label='Blue pen']").click()
+    expect(root.locator("button[aria-label='Blue pen']")).to_have_attribute("aria-pressed", "true")
+    draw(page, root)
+    rgb = root.locator("canvas.pdfslides-ink").evaluate("""c => {
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        for (let i = 3; i < d.length; i += 4) if (d[i] === 255) return [d[i-3], d[i-2], d[i-1]];
+        return null;
+    }""")
+    assert rgb == [0x1c, 0x7e, 0xd6]
+
+
+def test_annotation_not_available_in_toolbar_on_phones(browser, server):
+    ctx = browser.new_context(viewport={"width": 390, "height": 800})
+    pg = ctx.new_page()
+    pg.goto(f"{server}/index.html")
+    root = wait_ready(pg, "#pdfslides-1", 1)
+    expect(root.locator("button[aria-label='Annotate (D)']")).to_be_hidden()
+    ctx.close()
+
+
+# ---- Fullscreen toolbar and site shortcuts ---------------------------------
+
+def test_true_fullscreen_hides_toolbar_but_overlay_keeps_it(page, server):
+    root = open_page(page, server, "index.html", page_no=1)
+    bar = root.locator(".pdfslides-toolbar")
+    page.evaluate("document.getElementById('pdfslides-1').classList.add('is-fullscreen')")
+    expect(bar).to_be_hidden()
+    page.evaluate("document.getElementById('pdfslides-1').classList.add('is-pseudo-fullscreen')")
+    expect(bar).to_be_visible()  # no Esc on iPhone: keep the way out
+
+
+def test_f_keyup_does_not_reach_site_shortcuts(page, server):
+    root = open_page(page, server, "index.html", page_no=1)
+    page.evaluate("window.__keyups = []; document.addEventListener('keyup', e => window.__keyups.push(e.key))")
+    root.locator(".pdfslides-stage").focus()
+    page.keyboard.press("f")
+    page.keyboard.press("f")
+    page.keyboard.press("ArrowRight")
+    assert page.evaluate("window.__keyups") == ["ArrowRight"]

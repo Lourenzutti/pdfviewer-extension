@@ -9,6 +9,8 @@ Links in the text: [see slide 4](#/4), {{< slidelink 2 >}},
 
 {{< pdfslides slides/outline.pdf id=outlined >}}
 
+{{< pdfslides slides/perslide.pdf id=perslide >}}
+
 ::: {style="height: 2000px"}
 Spacer.
 :::

@@ -222,7 +222,7 @@ def test_slidelink_to_other_deck(page, server):
 def test_slidelink_to_other_page(page, server):
     page.goto(f"{server}/jump.html")
     page.get_by_role("link", name="lecture 1, slide 3").click()
-    page.wait_for_url(re.compile(r"/index\.html#/3$"))
+    page.wait_for_url(re.compile(r"/(index\.html)?#/3$"))  # Quarto may link index as "/"
     wait_ready(page, "#pdfslides-1", 3)
 
 
@@ -251,9 +251,27 @@ def test_toolbar_fits_on_phones(browser, server, width):
     assert bar.evaluate("b => b.scrollWidth <= b.clientWidth")
     for label in ["Previous slide", "Next slide", "Contents (T)", "Slide overview (G)", "Enter fullscreen (F)"]:
         expect(bar.get_by_role("button", name=label)).to_be_visible()
-    one_row = bar.evaluate("""b => {
-        const r = [...b.children].filter(c => c.offsetParent).map(c => c.getBoundingClientRect());
-        return Math.max(...r.map(x => x.top)) < Math.min(...r.map(x => x.bottom));
-    }""")
-    assert one_row, "toolbar wrapped onto several rows"
+    rows = bar.evaluate("""b => [...b.children].filter(c => c.offsetParent).map(c => {
+        const r = c.getBoundingClientRect();
+        return [c.className, Math.round(r.top), Math.round(r.bottom), Math.round(r.width)];
+    })""")
+    rows = [r for r in rows if "spacer" not in r[0]]  # zero-height flex filler
+    one_row = max(r[1] for r in rows) < min(r[2] for r in rows)
+    assert one_row, f"toolbar wrapped onto several rows: {rows}"
     ctx.close()
+
+
+# ---- One bookmark per slide (PowerPoint export) ----------------------------
+
+def test_per_slide_bookmarks_are_not_sections(page, server):
+    page.goto(f"{server}/jump.html")
+    root = page.locator("#perslide")
+    root.scroll_into_view_if_needed()
+    root = wait_ready(page, "#perslide")
+    # "Slide N:" is stripped (the number is shown separately) and no section label/headings.
+    root.locator("button[aria-label='Contents (T)']").click()
+    expect(toc_panel(root).locator(".pdfslides-toc-title")).to_have_text(["Alpha", "Beta", "Gamma"])
+    root.locator("button[aria-label='Contents (T)']").click()
+    expect(root.locator(".pdfslides-chapter")).to_have_text("")
+    root.locator("button[aria-label='Slide overview (G)']").click()
+    expect(grid_panel(root).locator(".pdfslides-grid-heading")).to_have_count(0)

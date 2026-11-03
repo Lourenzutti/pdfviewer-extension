@@ -27,12 +27,12 @@ def test_basic_container_and_dependency(built):
     assert attr(tag, "data-start") == "1"
     assert attr(tag, "aria-label") == "Lecture 1"
     assert 'class="pdfslides-fallback" href="slides/deck169.pdf"' in html
-    assert "site_libs/quarto-contrib/pdfslides-1.0.0/pdfslides.js" in html
-    assert "site_libs/quarto-contrib/pdfslides-1.0.0/pdfslides.css" in html
+    assert "site_libs/quarto-contrib/pdfslides-1.1.0/pdfslides.js" in html
+    assert "site_libs/quarto-contrib/pdfslides-1.1.0/pdfslides.css" in html
 
 
 def test_pdfjs_assets_are_published(built):
-    lib = built / "site_libs/quarto-contrib/pdfslides-1.0.0/pdfjs"
+    lib = built / "site_libs/quarto-contrib/pdfslides-1.1.0/pdfjs"
     for rel in ["pdf.min.js", "pdf.worker.min.js", "LICENSE", "wasm/openjpeg.wasm",
                 "standard_fonts/LiberationSans-Regular.ttf", "cmaps/UniGB-UCS2-H.bcmap"]:
         assert (lib / rel).is_file(), rel

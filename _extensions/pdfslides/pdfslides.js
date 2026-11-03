@@ -30,10 +30,22 @@
     shrink: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
     grid: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/>',
     toc: '<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
-    close: '<path d="M6 6l12 12M18 6L6 18"/>'
+    close: '<path d="M6 6l12 12M18 6L6 18"/>',
+    pen: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    undo: '<path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'
   };
+  // Annotation tools. Widths are fractions of the slide width so ink scales with the player.
+  var INK_TOOLS = [
+    { name: "Red pen", color: "#e03131", width: 0.004, alpha: 1 },
+    { name: "Blue pen", color: "#1c7ed6", width: 0.004, alpha: 1 },
+    { name: "Green pen", color: "#2f9e44", width: 0.004, alpha: 1 },
+    { name: "Black pen", color: "#212529", width: 0.004, alpha: 1 },
+    { name: "Highlighter", color: "#ffd43b", width: 0.022, alpha: 0.45 }
+  ];
   var THUMB_WIDTH = 240; // CSS px; thumbnails are rendered once and kept as images
   var NARROW = 560;
+  var TINY = 340; // below this the toolbar also drops the "Open PDF" link
   function icon(name) {
     return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICONS[name] + "</svg>";
   }
@@ -74,6 +86,7 @@
     this.resizeTimer = 0;
     this.sections = parseSections(root.getAttribute("data-sections"));
     this.chapters = []; // [{title, page}] shown in the toolbar and as progress ticks
+    this.sectionsAreReal = false; // false when every slide is its own bookmark
     this.contentsPromise = null;
     this.titles = new Map(); // page -> promise of the slide's guessed title
     this.panel = null; // "grid" | "toc" | null
@@ -108,6 +121,13 @@
     this.frame = el("div", "pdfslides-frame");
     this.links = el("div", "pdfslides-links");
     this.frame.appendChild(this.links);
+    this.ink = el("canvas", "pdfslides-ink", { "aria-hidden": "true" });
+    this.frame.appendChild(this.ink);
+    this.strokes = {}; // page -> [{c, w, a, pts: [[x, y] in 0..1]}]
+    this.inkPage = this.page;
+    this.inkTool = INK_TOOLS[0];
+    this.drawing = false;
+    this.activeStroke = null;
     this.status = el("div", "pdfslides-status");
     this.stage.appendChild(this.frame);
     this.stage.appendChild(this.status);
@@ -116,6 +136,8 @@
     this.tocPanel = this.makePanel("toc", "Contents");
     this.stage.appendChild(this.gridPanel);
     this.stage.appendChild(this.tocPanel);
+    this.stage.appendChild(this.makePalette());
+    this.bindInk();
 
     // Mouse-only scrubber: keyboard users have the page box, overview and contents.
     this.progress = el("div", "pdfslides-progress", { "aria-hidden": "true" });
@@ -152,8 +174,12 @@
     this.gridBtn.setAttribute("aria-expanded", "false");
     this.tocBtn.setAttribute("aria-controls", this.tocPanel.id);
     this.gridBtn.setAttribute("aria-controls", this.gridPanel.id);
+    this.penBtn = this.button("pen", "Annotate (D)", function () { self.setDrawing(!self.drawing); });
+    this.penBtn.classList.add("pdfslides-pen");
+    this.penBtn.setAttribute("aria-pressed", "false");
     bar.appendChild(this.tocBtn);
     bar.appendChild(this.gridBtn);
+    bar.appendChild(this.penBtn);
     if (this.allowDownload) {
       var open = el("a", "pdfslides-btn pdfslides-open", {
         href: this.src, target: "_blank", rel: "noopener", title: "Open PDF in a new tab", "aria-label": "Open PDF in a new tab"
@@ -180,6 +206,12 @@
     this.setNavEnabled();
 
     root.addEventListener("keydown", function (e) { self.onKey(e); });
+    // Site-wide shortcuts (Quarto opens search on the keyup of "f" or "/") must not
+    // fire for keys the player already used. Skip text inputs so typing still works.
+    root.addEventListener("keyup", function (e) {
+      if (e.target === self.input) return;
+      if (e.key === "f" || e.key === "F" || e.key === "/") e.stopPropagation();
+    });
     // Safari does not focus buttons on click; keep keyboard control in the player.
     root.addEventListener("click", function () {
       if (!root.contains(document.activeElement)) self.stage.focus({ preventScroll: true });
@@ -262,6 +294,8 @@
       self.pendingUserNav = false;
       self.contents().then(function (c) {
         self.chapters = c.source === "titles" ? [] : c.items.filter(function (it) { return it.level === 0; });
+        // One bookmark per slide (PowerPoint's export) is a slide list, not sections.
+        self.sectionsAreReal = self.chapters.length <= self.numPages * 0.7;
         self.renderTicks();
         self.updateChapter();
       });
@@ -374,8 +408,14 @@
         e.preventDefault(); this.togglePanel("grid"); return;
       case "t": case "T":
         e.preventDefault(); this.togglePanel("toc"); return;
+      case "d": case "D":
+        e.preventDefault(); this.setDrawing(!this.drawing); return;
+      case "z": case "Z":
+        if (this.drawing) { e.preventDefault(); this.undoInk(); }
+        return;
       case "Escape":
         if (this.panel) { e.preventDefault(); this.closePanel(); }
+        else if (this.drawing) { e.preventDefault(); this.setDrawing(false); }
         else if (this.pseudoFs) { e.preventDefault(); this.exitPseudo(); }
         return;
       default: return;
@@ -393,6 +433,7 @@
   };
 
   Player.prototype.onClick = function (e) {
+    if (this.drawing) return;
     if (e.target.closest && e.target.closest("a, button")) return;
     if (this.panel) { this.closePanel(); return; } // click beside the contents drawer
     if (!this.doc) { this.load(); return; }
@@ -403,7 +444,7 @@
 
   Player.prototype.onPointerDown = function (e) {
     // Only single-finger touch/pen gestures; a second finger (pinch) cancels.
-    if (e.pointerType === "mouse" || !e.isPrimary) { this.pointer = null; return; }
+    if (this.drawing || e.pointerType === "mouse" || !e.isPrimary) { this.pointer = null; return; }
     this.pointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
   };
 
@@ -418,6 +459,121 @@
       setTimeout(function () { self.suppressClick = false; }, 400);
       this.go(dx < 0 ? this.page + 1 : this.page - 1);
     }
+  };
+
+  // ---- Annotation -------------------------------------------------------
+  // Ink lives in memory only (per slide, resolution independent); a reload clears it.
+
+  Player.prototype.makePalette = function () {
+    var self = this;
+    var bar = el("div", "pdfslides-palette", { role: "toolbar", "aria-label": "Annotation tools" });
+    bar.hidden = true;
+    this.palette = bar;
+    this.swatches = INK_TOOLS.map(function (tool) {
+      var b = el("button", "pdfslides-swatch", { type: "button", title: tool.name, "aria-label": tool.name, "aria-pressed": "false" });
+      b.style.setProperty("--sw", tool.color);
+      if (tool.alpha < 1) b.classList.add("is-highlighter");
+      b.addEventListener("click", function () { self.setTool(tool); });
+      bar.appendChild(b);
+      return b;
+    });
+    bar.appendChild(el("span", "pdfslides-palette-sep"));
+    bar.appendChild(this.button("undo", "Undo (Z)", function () { self.undoInk(); }));
+    bar.appendChild(this.button("trash", "Clear this slide's ink", function () { self.clearInk(); }));
+    bar.appendChild(this.button("close", "Stop annotating (D)", function () { self.setDrawing(false); }));
+    // The palette sits on top of the slide: its clicks must not turn pages or start strokes.
+    ["click", "pointerdown", "pointerup"].forEach(function (type) {
+      bar.addEventListener(type, function (e) { e.stopPropagation(); });
+    });
+    this.setTool(this.inkTool);
+    return bar;
+  };
+
+  Player.prototype.setTool = function (tool) {
+    this.inkTool = tool;
+    this.swatches.forEach(function (b, i) { b.setAttribute("aria-pressed", String(INK_TOOLS[i] === tool)); });
+  };
+
+  Player.prototype.setDrawing = function (on) {
+    if (on && this.panel) this.closePanel();
+    this.drawing = !!on;
+    this.activeStroke = null;
+    this.root.classList.toggle("is-drawing", this.drawing);
+    this.palette.hidden = !this.drawing;
+    this.penBtn.setAttribute("aria-pressed", String(this.drawing));
+    this.stage.focus({ preventScroll: true });
+  };
+
+  Player.prototype.bindInk = function () {
+    var self = this;
+    var ink = this.ink;
+    function point(e) {
+      var r = ink.getBoundingClientRect();
+      if (!r.width || !r.height) return null;
+      return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
+    }
+    ink.addEventListener("pointerdown", function (e) {
+      if (!self.drawing || !e.isPrimary || (e.pointerType === "mouse" && e.button !== 0)) return;
+      var pt = point(e);
+      if (!pt) return;
+      e.preventDefault();
+      try { ink.setPointerCapture(e.pointerId); } catch (err) { /* synthetic events */ }
+      var t = self.inkTool;
+      self.activeStroke = { page: self.inkPage, c: t.color, w: t.width, a: t.alpha, pts: [pt, pt] };
+      self.redrawInk();
+    });
+    ink.addEventListener("pointermove", function (e) {
+      var s = self.activeStroke;
+      if (!s || !e.isPrimary) return;
+      var pt = point(e);
+      if (pt) { s.pts.push(pt); self.redrawInk(); }
+    });
+    function finish() {
+      var s = self.activeStroke;
+      self.activeStroke = null;
+      if (!s) return;
+      (self.strokes[s.page] = self.strokes[s.page] || []).push(s);
+      self.redrawInk();
+    }
+    ink.addEventListener("pointerup", finish);
+    ink.addEventListener("pointercancel", finish);
+  };
+
+  Player.prototype.undoInk = function () {
+    var list = this.strokes[this.inkPage];
+    if (list && list.length) { list.pop(); this.redrawInk(); }
+  };
+
+  Player.prototype.clearInk = function () {
+    this.strokes[this.inkPage] = [];
+    this.redrawInk();
+  };
+
+  Player.prototype.redrawInk = function () {
+    var ink = this.ink;
+    if (!ink) return;
+    var w = this.frame.clientWidth, h = this.frame.clientHeight;
+    if (!w || !h) return;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+    if (ink.width !== bw || ink.height !== bh) { ink.width = bw; ink.height = bh; }
+    var ctx = ink.getContext("2d");
+    ctx.clearRect(0, 0, bw, bh);
+    var list = (this.strokes[this.inkPage] || []).slice();
+    if (this.activeStroke && this.activeStroke.page === this.inkPage) list.push(this.activeStroke);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    list.forEach(function (s) {
+      ctx.globalAlpha = s.a;
+      ctx.strokeStyle = s.c;
+      ctx.lineWidth = Math.max(1, s.w * bw);
+      ctx.beginPath();
+      s.pts.forEach(function (pt, i) {
+        if (i) ctx.lineTo(pt[0] * bw, pt[1] * bh); else ctx.moveTo(pt[0] * bw, pt[1] * bh);
+      });
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
   };
 
   // ---- Rendering --------------------------------------------------------
@@ -511,10 +667,12 @@
     var fw = Math.min(w, h * this.ratio);
     this.frame.style.width = fw + "px";
     this.frame.style.height = fw / this.ratio + "px";
+    this.redrawInk();
   };
 
   Player.prototype.swap = function (entry) {
     var old = this.current;
+    this.inkPage = entry.page;
     this.ratio = entry.viewport.width / entry.viewport.height;
     this.layoutFrame();
     if (old !== entry.canvas) {
@@ -543,6 +701,7 @@
     var self = this;
     clearTimeout(this.resizeTimer);
     this.root.classList.toggle("is-narrow", this.root.clientWidth > 0 && this.root.clientWidth < NARROW);
+    this.root.classList.toggle("is-tiny", this.root.clientWidth > 0 && this.root.clientWidth < TINY);
     // Scale the current canvas immediately; re-render sharply once resizing settles.
     this.layoutFrame();
     this.resizeTimer = setTimeout(function () {
@@ -593,7 +752,9 @@
       })(outline, 0);
       return Promise.all(flat.map(function (it) {
         return self.resolveDest({ dest: it.dest }, 1).then(function (page) {
-          return page ? { title: it.title || "Slide " + page, page: page, level: it.level } : null;
+          // PowerPoint's PDF export names bookmarks "Slide 12: Title"; the number is shown separately.
+          var title = it.title.replace(/^Slide\s+\d+\s*:\s*/i, "");
+          return page ? { title: title || "Slide " + page, page: page, level: it.level } : null;
         });
       }));
     }).catch(function () { return []; }).then(function (items) {
@@ -641,8 +802,9 @@
 
   Player.prototype.updateChapter = function () {
     var c = this.chapterAt(this.page);
-    this.chapterLabel.textContent = c ? c.title : "";
-    this.chapterLabel.title = c ? c.title : "";
+    var text = c && this.sectionsAreReal ? c.title : "";
+    this.chapterLabel.textContent = text;
+    this.chapterLabel.title = text;
   };
 
   Player.prototype.renderTicks = function () {
@@ -775,9 +937,10 @@
     this.gridBuilt = this.contents().then(function (c) {
       var headings = {};
       if (c.source !== "titles") {
-        c.items.forEach(function (it) {
-          if (it.level === 0 && !headings[it.page]) headings[it.page] = it.title;
-        });
+        var tops = c.items.filter(function (it) { return it.level === 0; });
+        if (tops.length <= self.numPages * 0.7) {
+          tops.forEach(function (it) { if (!headings[it.page]) headings[it.page] = it.title; });
+        }
       }
       var grid = el("div", "pdfslides-grid");
       var io = "IntersectionObserver" in window ? new IntersectionObserver(function (entries) {
